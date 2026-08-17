@@ -42,6 +42,9 @@ Betyg IG, G eller VG. VG kräver kursmål 12, analysera och optimera
 utvecklingsprocesser i yrkesrollen som DevOps Engineer. En ordinarie examination
 plus en (1) omexamination per moment.
 
+[`LOG.md`](LOG.md) är underlaget för kursmål 12. Där dokumenteras löpande vad som
+gjorts, vad som brast och vad som ändrades.
+
 ## Kursmål
 
 Kunskaper
@@ -68,8 +71,9 @@ Kompetenser
 
 ## Struktur
 
-| Mapp | Innehåll |
+| Plats | Innehåll |
 |---|---|
+| `LOG.md` | Löpande logg, en post per arbetspass |
 | `docs/` | Schema, kursplan, anteckningar |
 | `notes/` | Egna anteckningar per ämne |
 | `labs/` | Labbar och kod |
