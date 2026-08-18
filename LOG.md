@@ -4,6 +4,286 @@ Nyaste överst. En post per genomgånget material.
 
 ---
 
+## 2026-08-19  Terraform Basics, arbetsflödet och state
+
+**Underlag**
+`[HashiCorp; Terraform Basics; https://youtu.be/_45W3Z8XWL4]`
+21:20, skärminspelning med kod och terminal. Presenteras av Nicholas Jackson.
+Exempelkod på `https://github.com/nicholasjackson/demo-terraform-basics`.
+
+### Genomgånget innehåll
+
+**00:19 Öppningsdemo mot Google Cloud**
+Videon börjar i andra änden än den föregående. En `vm.tf` visas med en resurs av
+typen `google_compute_instance` som heter `ollama`, med maskintyp vald via en
+variabel, zon, projekt, en boot disk som refererar till en `google_compute_disk`
+och ett `metadata`-block med ssh-nycklar. Ett `terraform apply` skapar
+servicekonton och den virtuella maskinen, installerar NVIDIA-drivrutiner och
+Docker och sätter upp en egen AI-assistent mot Ollama. Maskinen syns sedan i
+Google-konsolen som `ollama`, `g2-standard-4`, zon `europe-west1-b`, och
+webbgränssnittet går att logga in i med ett lösenord som konfigurationen
+genererat.
+
+**02:47 Nedrivning som städning**
+Innan resten av genomgången rivs demot med `terraform destroy`. Kommandot pratar
+med Google Cloud och tar bort allt som konfigurationen definierar, vilket
+kontrolleras i konsolen. Poängen som görs är att experiment inte ska ligga kvar
+och kosta pengar.
+
+**03:32 Installing Terraform**
+Installationsanvisningarna ligger på `developer.hashicorp.com`. Det går via
+pakethanterare som Brew på macOS, via binärer för Windows, macOS, Linux och BSD,
+eller via pakethanterare på Linux. I videon hämtas amd64-binären med `curl` till
+`terraform.zip` och installeras för hand.
+
+```console
+$ unzip terraform.zip
+Archive:  terraform.zip
+  inflating: LICENSE.txt
+  inflating: terraform
+
+$ ls
+LICENSE.txt  docker.tf  main.tf  terraform  terraform.zip
+
+$ sudo mv ./terraform /usr/local/bin
+
+$ terraform version
+Terraform v1.9.0
+```
+
+Flytten sker till `/usr/local/bin` eftersom den katalogen ligger i PATH, alltså
+går binären att köra från vilken mapp som helst.
+
+**05:19 Example Repository**
+Exempelrepot har fyra mappar, `aws`, `azure`, `gcp` och `basics`. Genomgången
+använder bara `basics`, som innehåller `main.tf` och `docker.tf`. De skapar
+Docker-containrar på den egna maskinen, alltså går det att öva utan att göra fel
+i en molnmiljö och utan att något kostar.
+
+**05:59 Terraform Configuration, main.tf**
+`main.tf` innehåller `terraform`-blocket som talar om vilka providers
+konfigurationen behöver, samt själva providerblocket.
+
+```hcl
+terraform {
+  required_providers {
+    docker = {
+      source  = "kreuzwerker/docker"
+      version = "3.0.2"
+    }
+  }
+}
+
+provider "docker" {}
+```
+
+En provider är översättningslagret mellan HCL-resurserna och ett API, i det här
+fallet Dockers.
+
+**06:36 Terraform Configuration, docker.tf**
+`docker.tf` definierar två resurser. Nyckelordet `resource` deklarerar en sak som
+ska skapas. Kommentarerna i filen visar vad varje resurs motsvarar som
+Docker-kommando för hand.
+
+```hcl
+// This is the same as doing:
+// docker pull hashicorp/vault:1.12.6
+resource "docker_image" "vault" {
+  name = "hashicorp/vault:1.12.6"
+}
+
+// This is the same as doing:
+// docker run -p 8200:8200 --name "terraform-basics-vault" hashicorp/vault:1.12.6
+resource "docker_container" "vault" {
+  name  = "terraform-basics-vault"
+  image = docker_image.vault.image_id
+
+  ports {
+    internal = 8200
+    external = 8200
+  }
+}
+```
+
+**07:20 Referenser skapar ordningen**
+Containern anger inte imagenamnet direkt utan pekar på
+`docker_image.vault.image_id`. Genom referensen förstår Terraform att imagen
+måste finnas innan containern kan skapas. Det finns ingen betydelse i vilken
+ordning resurserna står eller vilken fil de ligger i, beroendegrafen räknas fram
+ur referenserna.
+
+**07:45 terraform init**
+`init` läser konfigurationen i den aktuella mappen och hämtar de plugins som
+behövs från Terraform-registryt.
+
+```console
+$ terraform init
+Initializing the backend...
+Initializing provider plugins...
+- Finding kreuzwerker/docker versions matching "3.0.2"...
+```
+
+Efter körningen finns `.terraform` och `.terraform.lock.hcl` i mappen.
+
+**08:17 terraform plan**
+`plan` analyserar resurserna i konfigurationen, jämför mot vad som redan finns och
+redovisar skillnaden. Eftersom ingenting är skapat än ska allt skapas.
+
+```console
+$ terraform plan
+
+  # docker_image.vault will be created
+  + resource "docker_image" "vault" {
+      + id          = (known after apply)
+      + image_id    = (known after apply)
+      + name        = "hashicorp/vault:1.12.6"
+      + repo_digest = (known after apply)
+    }
+
+Plan: 2 to add, 0 to change, 0 to destroy.
+
+Note: You didn't use the -out option to save this plan, so Terraform can't
+guarantee to take exactly these actions if you run "terraform apply" now.
+```
+
+Värden som Terraform redan känner till skrivs ut, exempelvis namnet på imagen.
+Värden som bara Docker kan svara på står som `(known after apply)`.
+
+**09:51 terraform apply**
+`apply` skapar resurserna. Som säkerhetskontroll visas alltid planen först och
+körningen stannar på frågan `Do you want to perform these actions?` där `yes`
+krävs. Efteråt kontrolleras resultatet mot Docker direkt.
+
+```console
+$ docker ps
+CONTAINER ID   IMAGE          COMMAND                  CREATED         STATUS        PORTS                    NAMES
+0037ecb7c340   af3d918416ba   "docker-entrypoint.s…"   8 seconds ago   Up 6 seconds  0.0.0.0:8200->8200/tcp   terraform-basics-vault
+
+$ curl localhost:8200/v1/sys/health | jq
+{
+  "initialized": true,
+  "sealed": false,
+  "standby": false,
+  "performance_standby": false,
+  "replication_performance_mode": "disabled",
+  "replication_dr_mode": "disabled",
+  "server_time_utc": 1720094513,
+  "version": "1.12.6",
+  "cluster_name": "vault-cluster-7f6244b7",
+  "cluster_id": "42cedf4b-738c-4713-82a1-3045c9fe183e"
+}
+```
+
+**11:20 Updating Resources**
+Imagen ändras i konfigurationen från `hashicorp/vault:1.12.6` till
+`hashicorp/vault:1.17.1`. Vid nästa `apply` blir svaret inte en uppdatering utan
+en ersättning, eftersom vissa resurstyper inte går att ändra på plats.
+
+```console
+  # docker_image.vault must be replaced
+-/+ resource "docker_image" "vault" {
+      ~ id          = "sha256:af3d918416…hashicorp/vault:1.12.6" -> (known after apply)
+      ~ image_id    = "sha256:af3d918416…" -> (known after apply)
+      ~ name        = "hashicorp/vault:1.12.6" -> "hashicorp/vault:1.17.1" # forces replacement
+      ~ repo_digest = "hashicorp/vault@sha256:2517235f06…" -> (known after apply)
+    }
+
+Plan: 2 to add, 0 to change, 2 to destroy.
+```
+
+Containern måste bytas i sin tur eftersom den beror på imagen. Terraform tar bort
+den gamla containern, hämtar den nya imagen och skapar containern igen. Samma
+kontroll med `curl` och `jq` visar sedan version 1.17.1.
+
+**14:00 Nedrivning i arbetsflödet**
+`terraform destroy` tar bort de resurser som skapats av konfigurationen. Även här
+visas en plan först, `2 to destroy`, och ett `yes` krävs. Samma provider används
+som vid `apply`, fast åt andra hållet. Efteråt är `docker ps` tom. Arbetsflödet som
+helhet är alltså definiera konfiguration, `init`, `plan`, `apply` och sist
+nedrivningen. Poängen som görs är att resultatet blir detsamma varje gång `apply`
+körs.
+
+**15:26 Terraform State**
+Resurserna skapas om, den här gången med `terraform apply -auto-approve` som
+svarar ja automatiskt. Det beskrivs som en bekvämlighet som inte hör hemma i
+produktion. Efteråt innehåller mappen `docker.tf`, `main.tf`,
+`terraform.tfstate` och `terraform.tfstate.backup`.
+
+**16:21 Vad state-filen är**
+State-filen är där Terraform lagrar vad den faktiskt har skapat. Den är JSON och
+innehåller `lineage`, `outputs` och en lista `resources`, där varje post har
+`mode`, `type`, `name`, `provider` och `instances` med alla attribut som resursen
+fick. För containern syns exempelvis `id`, `image`, `name`, `ip_address` och
+`network_mode`.
+
+**16:52 State är jämförelsepunkten**
+Om ett värde ändras i state-filen, exempelvis namnet från
+`terraform-basics-vault` till `terraform-basics-vaults`, kommer ett `terraform
+plan` att rapportera en ändring. Terraform jämför alltså konfigurationen mot
+state, inte mot verkligheten direkt.
+
+**17:38 Var state ligger**
+I exemplet ligger state lokalt på disk. Det går också att lagra remote, i
+Terraform Cloud, i en S3-bucket, i cloud storage eller i Terraform Enterprise.
+Remote är rekommendationen för produktionskonfigurationer. Detaljerna lämnas till
+ett senare, mer avancerat material.
+
+**18:00 Inspektera state från CLI**
+`terraform show` skriver ut hela state. Med två resurser är det överskådligt, men
+i en större konfiguration med hundratals resurser blir utskriften oanvändbar.
+Därför finns `terraform state` med underkommandon för att lista resurser, flytta
+poster och hantera remote state.
+
+```console
+$ terraform state list
+docker_container.vault
+docker_image.vault
+
+$ terraform state show docker_container.vault
+    network_mode      = "default"
+    remove_volumes    = true
+    restart           = "no"
+    runtime           = "runc"
+    shm_size          = 64
+    start             = true
+    wait_timeout      = 60
+
+    ports {
+        external = 8200
+        internal = 8200
+        ip       = "0.0.0.0"
+        protocol = "tcp"
+    }
+```
+
+**19:58 Summary**
+Sammanfattningen tar upp providers som gränssnitt mot API, konfiguration som sätt
+att skapa resurser, hur Terraform upptäcker ändringar och avgör om en resurs kan
+uppdateras eller måste ersättas, samt hur nedrivningen städar. Nästa steg som
+utlovas är en uppföljare som bygger den virtuella maskinen från öppningsdemot i
+GCP, Azure eller AWS.
+
+### Täcker från förra posten
+
+Luckorna som noterades efter `Introduction to Terraform` är delvis fyllda.
+HCL-syntax finns nu med `terraform`-blocket, `required_providers`, `resource` och
+`ports`. Kommandona `init`, `apply`, `show`, `state list` och `state show` är
+visade i terminal, liksom nedrivningen, flaggan `-auto-approve` och noten om
+`-out`. Begreppen provider, referens mellan resurser och lokalt state är
+genomgångna med kod.
+
+### Vad videon inte tar upp
+
+Ingen `variable`, `output`, `local` eller `data source`, trots att öppningsdemot
+använder `var.` på flera rader. Inget `count` eller `for_each`. Inget om moduler.
+Ingen `terraform fmt`, `validate` eller `import`. Remote state och backend nämns
+men konfigureras inte. Ingen `.tfvars`. Ingen genomgång av `terraform.lock.hcl`
+utöver att filen dyker upp. Inget om workspaces och inget om policy as code.
+Beroendegrafen förklaras genom referenser men `depends_on` nämns inte.
+
+---
+
+
 ## 2026-08-18  Infrastructure as Code och Terraform
 
 **Underlag**
