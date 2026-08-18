@@ -4,6 +4,140 @@ Nyaste överst. En post per genomgånget material.
 
 ---
 
+## 2026-08-19  Egen körning, första Terraform-resursen
+
+**Underlag**
+Egen körning, `terraform/forsta-forsok/`. Terraform installerad via Homebrew,
+`hashicorp/tap`. `terraform version` ger `Terraform v1.15.8` på `darwin_arm64`.
+
+### Gjort
+
+Byggde en första resurs och körde hela arbetsflödet, `init`, `plan`, `apply`,
+`plan` igen och sist nedrivningen. Providern är `hashicorp/local`, alltså skapas
+en fil på disk i stället för något i molnet.
+
+```hcl
+terraform {
+  required_providers {
+    local = {
+      source  = "hashicorp/local"
+      version = "~> 2.4"
+    }
+  }
+}
+
+resource "local_file" "hej" {
+  content  = "Hej, detta är min första Terraform-resurs."
+  filename = "${path.module}/hello.txt"
+}
+```
+
+`init` löste versionsvillkoret `~> 2.4` till en konkret version och skrev
+låsfilen.
+
+```console
+$ terraform init
+Initializing provider plugins...
+- Finding hashicorp/local versions matching "~> 2.4"...
+- Installing hashicorp/local v2.9.0...
+- Installed hashicorp/local v2.9.0 (signed by HashiCorp)
+
+Terraform has created a lock file .terraform.lock.hcl to record the provider
+selections it made above.
+```
+
+`plan` visade resursen som ska skapas. De sju `content_*`-attributen sätts av
+providern och inte av konfigurationen, alltså står de som `(known after apply)`.
+
+```console
+$ terraform plan
+
+  # local_file.hej will be created
+  + resource "local_file" "hej" {
+      + content              = "Hej, detta är min första Terraform-resurs."
+      + content_base64sha256 = (known after apply)
+      + content_md5          = (known after apply)
+      + content_sha256       = (known after apply)
+      + directory_permission = "0777"
+      + file_permission      = "0777"
+      + filename             = "./hello.txt"
+      + id                   = (known after apply)
+    }
+
+Plan: 1 to add, 0 to change, 0 to destroy.
+```
+
+```console
+$ terraform apply
+local_file.hej: Creating...
+local_file.hej: Creation complete after 0s [id=ff2da409f7e0801a82028a80658f52158ba84612]
+
+Apply complete! Resources: 1 added, 0 changed, 0 destroyed.
+```
+
+### Problem
+
+Försökte läsa `hej.txt` och fick ingen fil.
+
+```console
+$ cat hej.txt
+cat: hej.txt: No such file or directory
+```
+
+Felet var att jag läste resursnamnet som filnamn. `"hej"` i
+`resource "local_file" "hej"` är etiketten Terraform använder internt, alltså det
+som blir adressen `local_file.hej` i state och i planen. Filnamnet på disk styrs
+av attributet `filename`.
+
+### Löst genom
+
+Läste planutskriften igen och såg raden `filename = "./hello.txt"`. Filen låg där
+hela tiden.
+
+```console
+$ cat hello.txt
+Hej, detta är min första Terraform-resurs.
+```
+
+Ett `plan` direkt efter `apply` bekräftade att konfigurationen och verkligheten
+stämde överens.
+
+```console
+$ terraform plan
+No changes. Your infrastructure matches the configuration.
+```
+
+Nedrivningen tog bort filen och tömde state.
+
+```console
+$ terraform destroy
+Plan: 0 to add, 0 to change, 1 to destroy.
+local_file.hej: Destroying... [id=ff2da409f7e0801a82028a80658f52158ba84612]
+local_file.hej: Destruction complete after 0s
+
+Apply complete! Resources: 0 added, 0 changed, 1 destroyed.
+```
+
+State gick från `serial 1` med en resurs till `serial 3` med en tom resurslista.
+Backupfilen `terraform.tfstate.backup` innehåller läget före nedrivningen, med
+`filename` satt till `./hello.txt` och samma id som `apply` skrev ut.
+
+### Vad jag tar med mig
+
+Resursnamnet och det som resursen faktiskt skapar är två skilda saker. Namnet är
+Terraforms adress för resursen, exempelvis vid `terraform state show
+local_file.hej`. Vad som hamnar på disk eller i molnet står i attributen.
+Planutskriften är därför facit och inte konfigurationen ur minnet.
+
+### Kvar
+
+Testa en riktig molnresurs, exempelvis med AWS-providern, i stället för
+`local_file`. Se hur state ser ut när flera resurser hänger ihop genom
+referenser, alltså det som `Terraform Basics` visade med image och container.
+
+---
+
+
 ## 2026-08-19  Terraform Basics, arbetsflödet och state
 
 **Underlag**
@@ -284,140 +418,6 @@ Beroendegrafen förklaras genom referenser men `depends_on` nämns inte.
 ---
 
 
-## 2026-08-19  Egen körning, första Terraform-resursen
-
-**Underlag**
-Egen körning, `terraform/forsta-forsok/`. Terraform installerad via Homebrew,
-`hashicorp/tap`. `terraform version` ger `Terraform v1.15.8` på `darwin_arm64`.
-
-### Gjort
-
-Byggde en första resurs och körde hela arbetsflödet, `init`, `plan`, `apply`,
-`plan` igen och sist nedrivningen. Providern är `hashicorp/local`, alltså skapas
-en fil på disk i stället för något i molnet.
-
-```hcl
-terraform {
-  required_providers {
-    local = {
-      source  = "hashicorp/local"
-      version = "~> 2.4"
-    }
-  }
-}
-
-resource "local_file" "hej" {
-  content  = "Hej, detta är min första Terraform-resurs."
-  filename = "${path.module}/hello.txt"
-}
-```
-
-`init` löste versionsvillkoret `~> 2.4` till en konkret version och skrev
-låsfilen.
-
-```console
-$ terraform init
-Initializing provider plugins...
-- Finding hashicorp/local versions matching "~> 2.4"...
-- Installing hashicorp/local v2.9.0...
-- Installed hashicorp/local v2.9.0 (signed by HashiCorp)
-
-Terraform has created a lock file .terraform.lock.hcl to record the provider
-selections it made above.
-```
-
-`plan` visade resursen som ska skapas. De sju `content_*`-attributen sätts av
-providern och inte av konfigurationen, alltså står de som `(known after apply)`.
-
-```console
-$ terraform plan
-
-  # local_file.hej will be created
-  + resource "local_file" "hej" {
-      + content              = "Hej, detta är min första Terraform-resurs."
-      + content_base64sha256 = (known after apply)
-      + content_md5          = (known after apply)
-      + content_sha256       = (known after apply)
-      + directory_permission = "0777"
-      + file_permission      = "0777"
-      + filename             = "./hello.txt"
-      + id                   = (known after apply)
-    }
-
-Plan: 1 to add, 0 to change, 0 to destroy.
-```
-
-```console
-$ terraform apply
-local_file.hej: Creating...
-local_file.hej: Creation complete after 0s [id=ff2da409f7e0801a82028a80658f52158ba84612]
-
-Apply complete! Resources: 1 added, 0 changed, 0 destroyed.
-```
-
-### Problem
-
-Försökte läsa `hej.txt` och fick ingen fil.
-
-```console
-$ cat hej.txt
-cat: hej.txt: No such file or directory
-```
-
-Felet var att jag läste resursnamnet som filnamn. `"hej"` i
-`resource "local_file" "hej"` är etiketten Terraform använder internt, alltså det
-som blir adressen `local_file.hej` i state och i planen. Filnamnet på disk styrs
-av attributet `filename`.
-
-### Löst genom
-
-Läste planutskriften igen och såg raden `filename = "./hello.txt"`. Filen låg där
-hela tiden.
-
-```console
-$ cat hello.txt
-Hej, detta är min första Terraform-resurs.
-```
-
-Ett `plan` direkt efter `apply` bekräftade att konfigurationen och verkligheten
-stämde överens.
-
-```console
-$ terraform plan
-No changes. Your infrastructure matches the configuration.
-```
-
-Nedrivningen tog bort filen och tömde state.
-
-```console
-$ terraform destroy
-Plan: 0 to add, 0 to change, 1 to destroy.
-local_file.hej: Destroying... [id=ff2da409f7e0801a82028a80658f52158ba84612]
-local_file.hej: Destruction complete after 0s
-
-Apply complete! Resources: 0 added, 0 changed, 1 destroyed.
-```
-
-State gick från `serial 1` med en resurs till `serial 3` med en tom resurslista.
-Backupfilen `terraform.tfstate.backup` innehåller läget före nedrivningen, med
-`filename` satt till `./hello.txt` och samma id som `apply` skrev ut.
-
-### Vad jag tar med mig
-
-Resursnamnet och det som resursen faktiskt skapar är två skilda saker. Namnet är
-Terraforms adress för resursen, exempelvis vid `terraform state show
-local_file.hej`. Vad som hamnar på disk eller i molnet står i attributen.
-Planutskriften är därför facit och inte konfigurationen ur minnet.
-
-### Kvar
-
-Testa en riktig molnresurs, exempelvis med AWS-providern, i stället för
-`local_file`. Se hur state ser ut när flera resurser hänger ihop genom
-referenser, alltså det som `Terraform Basics` visade med image och container.
-
----
-
-
 ## 2026-08-18  Infrastructure as Code och Terraform
 
 **Underlag**
@@ -587,7 +587,11 @@ formatet `[författare (person/org); innehållstitel; länk]`.
 
 ---
 
-## Mall
+## Mallar
+
+Två sorters poster. Genomgånget material och egen körning.
+
+### Mall, genomgånget material
 
 ```
 ## ÅÅÅÅ-MM-DD  Ämne
@@ -601,4 +605,28 @@ formatet `[författare (person/org); innehållstitel; länk]`.
 Vad avsnittet gick igenom, i egna ord.
 
 ### Vad materialet inte tar upp
+```
+
+### Mall, egen körning
+
+```
+## ÅÅÅÅ-MM-DD  Ämne
+
+**Underlag**
+Egen körning, sökväg i repot. Version på verktyget.
+
+### Gjort
+Vad som byggdes och kördes. Koden som kodblock, output som console-block.
+
+### Problem
+Vad som gick fel.
+
+### Löst genom
+Vad som löste det, med output som bevis.
+
+### Vad jag tar med mig
+Lärdomen, inte händelsen.
+
+### Kvar
+Vad som är otestat och vad nästa steg är.
 ```
