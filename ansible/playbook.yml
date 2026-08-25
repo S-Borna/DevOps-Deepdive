@@ -1,0 +1,11 @@
+---
+- name: Konfigurera lokal Ubuntu
+  hosts: servers
+  become: true
+
+  tasks:
+    - name: Installera tree
+      ansible.builtin.apt:
+        name: tree
+        state: present
+        update_cache: true

@@ -14,6 +14,9 @@ crash.log
 override.tf
 override.tf.json
 
+# Ansible
+ansible/inventory.ini
+
 # Kubernetes
 kubeconfig
 *.kubeconfig
